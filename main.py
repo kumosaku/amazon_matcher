@@ -13,6 +13,9 @@ Amazonの購入履歴CSVとクレジットカード明細PDFを突き合わせ�
 """)
 
 # サイドバーでファイルアップロード
+if st.sidebar.button("📖 アプリの使い方説明", type="primary"):
+    st.switch_page("pages/01_使い方.py")
+
 st.sidebar.header("Amazon購入履歴 (CSV)ファイルアップロード")
 amazon_file = st.sidebar.file_uploader("※このアプリでは、アップロードされたファイルを保存しません。", type=["csv"])
 
