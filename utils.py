@@ -12,41 +12,53 @@ def extract_table_from_pdf(pdf_file, raw=False):
     
     try:
         with pdfplumber.open(pdf_file) as pdf:
-            # 戦略1: デフォルト (設定なし)
-            # 戦略2: lattice (罫線重視)
-            # 戦略3: stream (空白重視)
-            
-            # まずはシンプルに全ページから抽出を試みる
-            # ページごとに最適な設定が変わる可能性があるが、今回は統一して処理
-            
             temp_rows = []
             
             for page in pdf.pages:
-                # まずextract_tables()をデフォルトで試す
-                tables = page.extract_tables()
-                
-                # テーブルが見つからない、または行数が少ない場合は設定を変えてみる
-                if not tables:
-                    tables = page.extract_tables(table_settings={"vertical_strategy": "text", "horizontal_strategy": "text"}) # stream like
-                
-                if not tables:
-                     tables = page.extract_tables(table_settings={"vertical_strategy": "lines", "horizontal_strategy": "lines"}) # lattice like
+                if raw:
+                    # Rawモード: テキスト全体を抽出（layout=Trueで視覚的配置を維持）
+                    # extract_textは表の外にある文字も拾ってくれる
+                    text = page.extract_text(layout=True)
+                    if text:
+                        for line in text.split('\n'):
+                             # 連続する空白を区切りとみなす (regexで2文字以上の空白)
+                             # strip()してしまうと文頭のインデント情報が消えるが、
+                             # DataFrameに入れるなら値としての区切りが重要なのでstripしてから分割する
+                             parts = re.split(r'\s{2,}', line.strip())
+                             # 空行でなければ追加
+                             if any(parts) and "".join(parts).strip():
+                                 temp_rows.append(parts)
+                else:
+                    # 通常モード: テーブル抽出
+                    # 戦略1: デフォルト (設定なし)
+                    # 戦略2: lattice (罫線重視)
+                    # 戦略3: stream (空白重視)
+                    
+                    tables = page.extract_tables()
+                    
+                    # テーブルが見つからない、または行数が少ない場合は設定を変えてみる
+                    if not tables:
+                        tables = page.extract_tables(table_settings={"vertical_strategy": "text", "horizontal_strategy": "text"}) # stream like
+                    
+                    if not tables:
+                            tables = page.extract_tables(table_settings={"vertical_strategy": "lines", "horizontal_strategy": "lines"}) # lattice like
 
-                for table in tables:
-                    for row in table:
-                        # セルの中身をクリーニング
-                        # Noneの場合は空文字に、改行コードはスペースに置換
-                        clean_row = []
-                        for cell in row:
-                            if cell:
-                                clean_cell = str(cell).replace('\n', ' ').strip()
-                            else:
-                                clean_cell = ""
-                            clean_row.append(clean_cell)
-                        
-                        # 空でない行のみ追加
-                        if any(clean_row):
-                            temp_rows.append(clean_row)
+                    for table in tables:
+                        for row in table:
+                            # セルの中身をクリーニング
+                            clean_row = []
+                            for cell in row:
+                                if cell is None:
+                                    clean_cell = ""
+                                else:
+                                    # 通常時は改行除去
+                                    clean_cell = str(cell).replace('\n', ' ').strip()
+                                
+                                clean_row.append(clean_cell)
+                            
+                            # 空でない行のみ追加
+                            if any(clean_row):
+                                temp_rows.append(clean_row)
             
             all_rows = temp_rows
 
@@ -225,7 +237,7 @@ def normalize_price(price_series):
     """
     # 文字列型に変換してから処理
     return pd.to_numeric(
-        price_series.astype(str).str.replace(',', '').str.replace('¥', '').str.replace('円', ''), 
+        price_series.astype(str).str.strip().str.replace(',', '').str.replace('¥', '').str.replace('円', ''), 
         errors='coerce'
     )
 

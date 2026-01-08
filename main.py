@@ -122,8 +122,18 @@ if amazon_file and card_file:
                 
                 # ヘッダー行の指定
                 st.markdown("##### ヘッダー行の指定")
-                # 1列目のユニークな値を取得して選択肢にする
-                col0_values = sorted([str(x) for x in df_card_raw.iloc[:, 0].unique() if x])
+                # 1列目のユニークな値を取得して選択肢にする (出現順を維持)
+                # nanやNoneを除外
+                raw_col0 = df_card_raw.iloc[:, 0]
+                col0_values = []
+                seen = set()
+                
+                for x in raw_col0:
+                    x_str = str(x).strip()
+                    # 意味のある文字列のみを対象にする (必要に応じて調整)
+                    if x_str and x_str not in seen and x_str.lower() != 'nan' and x_str.lower() != 'none':
+                        col0_values.append(x_str)
+                        seen.add(x_str)
                 
                 # レイアウト調整: 1/2の幅にする
                 header_col1, header_col2 = st.columns(2)
@@ -138,7 +148,7 @@ if amazon_file and card_file:
                 # 選択された値が最初に出現する行を探す
                 header_row_index = 0
                 for i, val in enumerate(df_card_raw.iloc[:, 0]):
-                    if str(val) == header_trigger_val:
+                    if str(val).strip() == header_trigger_val:
                         header_row_index = i
                         break
                 
