@@ -333,3 +333,76 @@ def get_default_index(columns, candidates, check_numeric=False, df=None):
                     except:
                         pass
     return 0
+
+def split_combined_date_column(df):
+    """
+    日付と商品名が結合してしまっている列を検出し、分割する。
+    例: "2025/11/26 OPENAI..." -> "2025/11/26", "OPENAI..."
+    """
+    if df.empty:
+        return df
+
+    # 日付+空白+文字列 のパターンを持つ列を探す
+    # YYYY/MM/DD または MM/DD に続く空白
+    date_start_pattern = re.compile(r'^(\d{4}/\d{1,2}/\d{1,2}|\d{1,2}/\d{1,2})\s+(.+)')
+    
+    target_col_idx = -1
+    
+    # 全列探索 (最初の数行で判定)
+    for i, col in enumerate(df.columns):
+        series = df[col].astype(str)
+        # 先頭5行程度で、パターンにマッチする行が一定割合以上あるか確認
+        sample = series.head(10)
+        match_count = sum(1 for x in sample if date_start_pattern.match(x))
+        
+        if len(sample) > 0 and match_count > 0:
+            target_col_idx = i
+            break
+    
+    if target_col_idx == -1:
+        return df
+
+    target_col_name = df.columns[target_col_idx]
+    
+    new_rows = []
+    
+    # 既存の列リスト
+    original_cols = list(df.columns)
+    
+    for _, row in df.iterrows():
+        val = str(row[target_col_name])
+        match = date_start_pattern.match(val)
+        
+        row_list = list(row)
+        
+        if match:
+            date_part = match.group(1)
+            desc_part = match.group(2)
+            
+            # 対象列を日付で上書き
+            row_list[target_col_idx] = date_part
+            
+            # その直後に商品名を挿入
+            row_list.insert(target_col_idx + 1, desc_part)
+        else:
+            # マッチしない場合、空文字を挿入して列数を合わせる
+            row_list.insert(target_col_idx + 1, "")
+            
+        new_rows.append(row_list)
+        
+    new_cols = list(original_cols)
+    
+    # 列数チェック
+    max_len = max(len(r) for r in new_rows)
+    
+    if max_len > len(new_cols):
+        # 足りない分だけカラムを追加（末尾に）
+        # これにより、挿入されたデータ（商品名）は本来の「利用店名」カラム（index+1）に収まり、
+        # 以降のデータも1つずつ右にずれて正しいカラム（利用者、支払方法など）に収まることを期待
+        for k in range(max_len - len(new_cols)):
+            new_cols.append(f"Auto_Col_{len(new_cols)}")
+    
+    # 行長さを揃える
+    adjusted_rows = [row + [""] * (len(new_cols) - len(row)) for row in new_rows]
+    
+    return pd.DataFrame(adjusted_rows, columns=new_cols)

@@ -145,25 +145,31 @@ if amazon_file and card_file:
                   header_trigger_val = st.selectbox(
                       "ヘッダー行の1列目にある文字列を選択してください",
                       options=col0_values,
-                      key="header_trigger_val"
+                      index=None,
+                      placeholder="開始文字を選択してください",
+                      key="header_row_selector"
                   )
                 
                 # 選択された値が最初に出現する行を探す
                 header_row_index = 0
-                for i, val in enumerate(df_card_raw.iloc[:, 0]):
-                    if str(val).strip() == header_trigger_val:
-                        header_row_index = i
-                        break
-                
-                st.caption(f"選択された文字列「{header_trigger_val}」は、行 {header_row_index} に見つかりました。この行をヘッダーとして扱います。")
+                if header_trigger_val:
+                    for i, val in enumerate(df_card_raw.iloc[:, 0]):
+                        if str(val).strip() == header_trigger_val:
+                            header_row_index = i
+                            break
+                    
+                    st.caption(f"選択された文字列「{header_trigger_val}」は、行 {header_row_index} に見つかりました。この行をヘッダーとして扱います。")
 
-                # 整形処理 (指定行をヘッダーとする)
-                df_sliced = df_card_raw.iloc[int(header_row_index):].reset_index(drop=True)
-                
-                # 1行目をヘッダーに設定
-                new_header = df_sliced.iloc[0].astype(str).str.replace('\n', ' ').str.strip()
-                df_card = df_sliced[1:].copy()
-                df_card.columns = new_header
+                    # 整形処理 (指定行をヘッダーとする)
+                    df_sliced = df_card_raw.iloc[int(header_row_index):].reset_index(drop=True)
+                    
+                    # 1行目をヘッダーに設定
+                    new_header = df_sliced.iloc[0].astype(str).str.replace('\n', ' ').str.strip()
+                    df_card = df_sliced[1:].copy()
+                    df_card.columns = new_header
+                else:
+                     st.info("上のリストから、表のヘッダー（例: 利用日）が含まれる行を選択してください。")
+                     df_card = None # まだ選択されていない場合
                 
                 # カラム名の重複回避
                 unique_cols = []
@@ -183,6 +189,9 @@ if amazon_file and card_file:
                     unique_cols.append(c_str)
                 
                 df_card.columns = unique_cols
+
+                # 日付と商品名がくっついている場合の分割処理
+                df_card = utils.split_combined_date_column(df_card)
 
                 st.subheader(f"3. 整形後プレビュー")
                 st.dataframe(df_card, height=400)
@@ -204,61 +213,69 @@ if amazon_file and card_file:
             
             with col1:
                 st.markdown("### Amazonデータ列指定")
-                col_amz_date = st.selectbox("購入日", df_amazon.columns, index=utils.get_default_index(df_amazon.columns, ['注文日', '購入日', 'Date']))
-                col_amz_price = st.selectbox("金額", df_amazon.columns, index=utils.get_default_index(df_amazon.columns, ['請求額', '金額', 'Price', '支払金額']), key='amz_price')
-                col_amz_item = st.selectbox("商品名 (検索値A)", df_amazon.columns, index=utils.get_default_index(df_amazon.columns, ['商品名', 'タイトル', 'Item']), key='amz_item')
+                col_amz_date = st.selectbox("購入日", df_amazon.columns, index=None, placeholder="列を選択してください")
+                col_amz_price = st.selectbox("金額", df_amazon.columns, index=None, key='amz_price', placeholder="列を選択してください")
+                col_amz_item = st.selectbox("商品名 (検索値A)", df_amazon.columns, index=None, key='amz_item', placeholder="列を選択してください")
 
             with col2:
                 st.markdown("### カード明細列指定")
                 col_card_date = st.selectbox(
                     "利用日", 
                     df_card.columns, 
-                    index=utils.get_default_index(df_card.columns, ['利用日', '日付', 'Date', 'Time']),
-                    key='card_date'
+                    index=None,
+                    key='card_date',
+                    placeholder="列を選択してください"
                 )
                 
                 col_card_price = st.selectbox(
                     "金額", 
                     df_card.columns, 
-                    index=utils.get_default_index(df_card.columns, ['金額', '請求額', 'Price', 'Amount', '円', '支払']),
-                    key='card_price'
+                    index=None,
+                    key='card_price',
+                    placeholder="列を選択してください"
                 )
                 
                 col_card_desc = st.selectbox(
                     "利用店名・商品名 (既存)", 
                     df_card.columns, 
-                    index=utils.get_default_index(df_card.columns, ['利用店名', '商品名', 'Description', 'Item', 'Merchant', '摘要']),
-                    key='card_desc'
+                    index=None,
+                    key='card_desc',
+                    placeholder="列を選択してください"
                 )
                 
                 # 選択された列のサンプルデータを表示
-                sample_values = df_card[col_card_desc].dropna().unique()[:5]
-                st.caption(f"💡 選択中の列「{col_card_desc}」のサンプル: {', '.join([str(x) for x in sample_values])}")
-                
-                # 利用店名フィルタリング UI
-                unique_merchants = sorted([str(x) for x in df_card[col_card_desc].unique() if x])
-                
-                # デフォルト選択: "AMAZON"関連（全角・半角・カタカナ・英語）を含むものを優先
-                amazon_keywords = ["AMAZON", "Amazon", "アマゾン", "ｱﾏｿﾞﾝ"]
-                default_merchants = [
-                    m for m in unique_merchants 
-                    if any(k in m.upper() for k in amazon_keywords) or any(k in m for k in amazon_keywords)
-                ]
-                
-                if not default_merchants:
-                    default_merchants = unique_merchants # 見つからなければ全選択
-                
-                
-                selected_merchants = st.multiselect(
-                    "照合対象とする店名を選択", 
-                    options=unique_merchants,
-                    default=default_merchants,
-                    key=f"merchants_{col_card_desc}"
-                )
+                if col_card_desc:
+                    sample_values = df_card[col_card_desc].dropna().unique()[:5]
+                    st.caption(f"💡 選択中の列「{col_card_desc}」のサンプル: {', '.join([str(x) for x in sample_values])}")
+                    
+                    # 利用店名フィルタリング UI
+                    unique_merchants = sorted([str(x) for x in df_card[col_card_desc].unique() if x])
+                    
+                    
+                    selected_merchants = st.multiselect(
+                        "照合対象とする店名を選択", 
+                        options=unique_merchants,
+                        default=[],
+                        key=f"merchants_{col_card_desc}"
+                    )
+                else:
+                    st.info("利用店名列を選択すると、詳細設定が表示されます。")
+                    selected_merchants = []
                 
                 
             if st.button("照合実行"):
-                if not selected_merchants:
+                # 必須カラムの選択チェック
+                missing_cols = []
+                if not col_amz_date: missing_cols.append("Amazon購入日")
+                if not col_amz_price: missing_cols.append("Amazon金額")
+                if not col_amz_item: missing_cols.append("Amazon商品名")
+                if not col_card_date: missing_cols.append("カード利用日")
+                if not col_card_price: missing_cols.append("カード金額")
+                if not col_card_desc: missing_cols.append("カード利用店名")
+
+                if missing_cols:
+                    st.error(f"以下の列が選択されていません: {', '.join(missing_cols)}")
+                elif not selected_merchants and col_card_desc: # col_card_descがあればselected_merchantsのチェックも有効
                     st.warning("照合対象の店名が1つも選択されていません。")
                 else:
                     with st.spinner("照合中..."):
@@ -278,7 +295,7 @@ if amazon_file and card_file:
                 st.subheader("5. 照合結果")
                 
                 # フィルタリング機能
-                st.markdown("##### 🔍 結果のフィルタリング")
+                st.markdown("##### 🔍 結果の確認")
                 
                 # レイアウト調整: 1/2の幅にする
                 filter_col1, filter_col2 = st.columns(2)
