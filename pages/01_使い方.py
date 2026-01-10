@@ -1,6 +1,9 @@
 import streamlit as st
 from pathlib import Path
 
+import time
+st.write("★★反映テスト:", time.strftime("%H:%M:%S"))
+
 st.set_page_config(page_title="使い方", page_icon="📖", layout="wide")
 
 # このファイル（01_使い方.py）がある場所を基準にする
@@ -53,13 +56,19 @@ if img2.exists():
 
 st.subheader("3.（PDFの場合）ヘッダー行の先頭列の値を選択")
 st.markdown("PDFの場合は、ヘッダー行の先頭列にある値を選択してください。")
+
+# ★ ここに注意文を移動
+st.warning("※CSVの場合は設定不要です。次へ進みます。")
+
 img3 = ASSETS_DIR / "step3_pdf_header.png"
 if img3.exists():
     col, _ = st.columns([7, 3])
     with col:
-        st.image(str(img3), caption="PDFヘッダーの選択", use_container_width=True)
-else:
-    st.caption("※CSVの場合は設定不要です。次へ進みます。")
+        st.image(
+            str(img3),
+            caption="PDFヘッダーの選択",
+            use_container_width=True
+        )
 
 st.subheader("4. 照合設定 → 照合実行")
 st.markdown("「照合設定」で照合する項目を選び、**「照合実行」**ボタンをクリックします。")
@@ -82,4 +91,4 @@ img6 = ASSETS_DIR / "step6_DL.png"
 if img6.exists():
     col, _ = st.columns([5, 5])
     with col:
-        st.image(str(img6), caption="ダウンロード", use_container_width=True)
+        st.image(str(img6), caption="ダウンロード", width=700)
