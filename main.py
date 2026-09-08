@@ -16,8 +16,34 @@ Amazonの購入履歴CSVとクレジットカード明細PDFを突き合わせ�
 if st.sidebar.button("📖 アプリの使い方説明", type="primary"):
     st.switch_page("pages/01_使い方.py")
 
+def cached_uploader(label, file_type, uploader_key, cache_key, **kwargs):
+    """
+    file_uploaderは画面遷移でウィジェットが再生成されると中身が空に戻るため、
+    アップロード内容をsession_stateにバイト列でキャッシュし、
+    次回以降は未アップロード時に自動で復元する。
+    """
+    uploaded = st.sidebar.file_uploader(label, type=file_type, key=uploader_key, **kwargs)
+
+    if uploaded is not None:
+        st.session_state[cache_key] = {"name": uploaded.name, "bytes": uploaded.getvalue()}
+        uploaded.seek(0)
+        return uploaded
+
+    cached = st.session_state.get(cache_key)
+    if cached:
+        st.sidebar.caption(f"📎 保持中のファイル: {cached['name']}")
+        restored = io.BytesIO(cached["bytes"])
+        restored.name = cached["name"]
+        return restored
+
+    return None
+
+
 st.sidebar.header("Amazon購入履歴 (CSV)ファイルアップロード")
-amazon_file = st.sidebar.file_uploader("※このアプリでは、アップロードされたファイルを保存しません。", type=["csv"], key="amazon_file_uploader")
+amazon_file = cached_uploader(
+    "※このアプリでは、アップロードされたファイルを保存しません。",
+    ["csv"], "amazon_file_uploader", "amazon_file_cache"
+)
 
 # クレジットカード明細のファイル形式選択
 st.sidebar.markdown("---")
@@ -25,9 +51,14 @@ st.sidebar.subheader("クレジットカード明細")
 card_file_type = st.sidebar.radio("ファイル形式を選択", ["PDF", "CSV"], horizontal=True, key="card_file_type")
 
 if card_file_type == "PDF":
-    card_file = st.sidebar.file_uploader("クレジットカード明細 (PDF)", type=["pdf"], key="card_pdf")
+    card_file = cached_uploader("クレジットカード明細 (PDF)", ["pdf"], "card_pdf", "card_pdf_cache")
 else:
-    card_file = st.sidebar.file_uploader("クレジットカード明細 (CSV)", type=["csv"], key="card_csv")
+    card_file = cached_uploader("クレジットカード明細 (CSV)", ["csv"], "card_csv", "card_csv_cache")
+
+if st.sidebar.button("🗑️ アップロード内容をクリア"):
+    for k in ["amazon_file_cache", "card_pdf_cache", "card_csv_cache"]:
+        st.session_state.pop(k, None)
+    st.rerun()
 
 if amazon_file and card_file:
     try:
@@ -209,6 +240,20 @@ if amazon_file and card_file:
 
 
             # カラムマッピングの設定
+            def persistent_selectbox(label, options, value_key, widget_key, **kwargs):
+                """
+                Streamlitは別ページに移動して戻ると、その間描画されなかった
+                ウィジェットのsession_state(widget_key)を自動的に消去してしまう。
+                そのため、選択値を非ウィジェットの通常キー(value_key)にも複製して保持し、
+                widget_keyが消えていてもそちらから選択状態を復元する。
+                """
+                options_list = list(options)
+                prev_val = st.session_state.get(value_key)
+                index = options_list.index(prev_val) if prev_val in options_list else None
+                selected = st.selectbox(label, options_list, index=index, key=widget_key, **kwargs)
+                st.session_state[value_key] = selected
+                return selected
+
             settings_header_col, settings_reset_col = st.columns([4, 1])
             with settings_header_col:
                 st.subheader("4. 照合設定")
@@ -217,6 +262,8 @@ if amazon_file and card_file:
                     reset_keys = [
                         'amz_date', 'amz_price', 'amz_item',
                         'card_date', 'card_price', 'card_desc',
+                        'amz_date_val', 'amz_price_val', 'amz_item_val',
+                        'card_date_val', 'card_price_val', 'card_desc_val',
                     ]
                     for k in reset_keys:
                         st.session_state.pop(k, None)
@@ -230,33 +277,30 @@ if amazon_file and card_file:
 
             with col1:
                 st.markdown("### Amazonデータ列指定")
-                col_amz_date = st.selectbox("購入日", df_amazon.columns, index=None, key='amz_date', placeholder="列を選択してください")
-                col_amz_price = st.selectbox("金額", df_amazon.columns, index=None, key='amz_price', placeholder="列を選択してください")
-                col_amz_item = st.selectbox("商品名 (検索値A)", df_amazon.columns, index=None, key='amz_item', placeholder="列を選択してください")
+                col_amz_date = persistent_selectbox("購入日", df_amazon.columns, 'amz_date_val', 'amz_date', placeholder="列を選択してください")
+                col_amz_price = persistent_selectbox("金額", df_amazon.columns, 'amz_price_val', 'amz_price', placeholder="列を選択してください")
+                col_amz_item = persistent_selectbox("商品名 (検索値A)", df_amazon.columns, 'amz_item_val', 'amz_item', placeholder="列を選択してください")
 
             with col2:
                 st.markdown("### カード明細列指定")
-                col_card_date = st.selectbox(
+                col_card_date = persistent_selectbox(
                     "利用日",
                     df_card.columns,
-                    index=None,
-                    key='card_date',
+                    'card_date_val', 'card_date',
                     placeholder="列を選択してください"
                 )
 
-                col_card_price = st.selectbox(
+                col_card_price = persistent_selectbox(
                     "金額",
                     df_card.columns,
-                    index=None,
-                    key='card_price',
+                    'card_price_val', 'card_price',
                     placeholder="列を選択してください"
                 )
 
-                col_card_desc = st.selectbox(
+                col_card_desc = persistent_selectbox(
                     "利用店名・商品名 (既存)",
                     df_card.columns,
-                    index=None,
-                    key='card_desc',
+                    'card_desc_val', 'card_desc',
                     placeholder="列を選択してください"
                 )
 
@@ -268,13 +312,16 @@ if amazon_file and card_file:
                     # 利用店名フィルタリング UI
                     unique_merchants = sorted([str(x) for x in df_card[col_card_desc].unique() if pd.notna(x) and str(x).strip() != ""])
 
+                    merchants_value_key = f"merchants_val_{col_card_desc}"
+                    prev_merchants = [m for m in st.session_state.get(merchants_value_key, []) if m in unique_merchants]
 
                     selected_merchants = st.multiselect(
                         "照合対象とする店名を選択",
                         options=unique_merchants,
-                        default=[],
+                        default=prev_merchants,
                         key=f"merchants_{col_card_desc}"
                     )
+                    st.session_state[merchants_value_key] = selected_merchants
                 else:
                     st.info("利用店名列を選択すると、詳細設定が表示されます。")
                     selected_merchants = []
