@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from utils import extract_table_from_pdf, process_matching, cleanup_dataframe
+from utils import extract_table_from_pdf, process_matching
 import utils
 import io
 
@@ -17,12 +17,12 @@ if st.sidebar.button("📖 アプリの使い方説明", type="primary"):
     st.switch_page("pages/01_使い方.py")
 
 st.sidebar.header("Amazon購入履歴 (CSV)ファイルアップロード")
-amazon_file = st.sidebar.file_uploader("※このアプリでは、アップロードされたファイルを保存しません。", type=["csv"])
+amazon_file = st.sidebar.file_uploader("※このアプリでは、アップロードされたファイルを保存しません。", type=["csv"], key="amazon_file_uploader")
 
 # クレジットカード明細のファイル形式選択
 st.sidebar.markdown("---")
 st.sidebar.subheader("クレジットカード明細")
-card_file_type = st.sidebar.radio("ファイル形式を選択", ["PDF", "CSV"], horizontal=True)
+card_file_type = st.sidebar.radio("ファイル形式を選択", ["PDF", "CSV"], horizontal=True, key="card_file_type")
 
 if card_file_type == "PDF":
     card_file = st.sidebar.file_uploader("クレジットカード明細 (PDF)", type=["pdf"], key="card_pdf")
@@ -170,31 +170,32 @@ if amazon_file and card_file:
                 else:
                      st.info("上のリストから、表のヘッダー（例: 利用日）が含まれる行を選択してください。")
                      df_card = None # まだ選択されていない場合
-                
-                # カラム名の重複回避
-                unique_cols = []
-                seen = {}
-                current_cols = df_card.columns.astype(str)
-                
-                for i, c in enumerate(current_cols):
-                    c_str = str(c).strip()
-                    if not c_str:
-                            c_str = f"Col_{i}"
-                    
-                    if c_str in seen:
-                        seen[c_str] += 1
-                        c_str = f"{c_str}_{seen[c_str]}"
-                    else:
-                        seen[c_str] = 0
-                    unique_cols.append(c_str)
-                
-                df_card.columns = unique_cols
 
-                # 日付と商品名がくっついている場合の分割処理
-                df_card = utils.split_combined_date_column(df_card)
+                if df_card is not None:
+                    # カラム名の重複回避
+                    unique_cols = []
+                    seen = {}
+                    current_cols = df_card.columns.astype(str)
 
-                st.subheader(f"3. 整形後プレビュー")
-                st.dataframe(df_card, height=400)
+                    for i, c in enumerate(current_cols):
+                        c_str = str(c).strip()
+                        if not c_str:
+                                c_str = f"Col_{i}"
+
+                        if c_str in seen:
+                            seen[c_str] += 1
+                            c_str = f"{c_str}_{seen[c_str]}"
+                        else:
+                            seen[c_str] = 0
+                        unique_cols.append(c_str)
+
+                    df_card.columns = unique_cols
+
+                    # 日付と商品名がくっついている場合の分割処理
+                    df_card = utils.split_combined_date_column(df_card)
+
+                    st.subheader(f"3. 整形後プレビュー")
+                    st.dataframe(df_card, height=400)
             
             else:
                 # CSVの場合: 1行目を自動的にヘッダーとして扱う
@@ -208,52 +209,68 @@ if amazon_file and card_file:
 
 
             # カラムマッピングの設定
-            st.subheader("4. 照合設定")
+            settings_header_col, settings_reset_col = st.columns([4, 1])
+            with settings_header_col:
+                st.subheader("4. 照合設定")
+            with settings_reset_col:
+                if st.button("🔄 設定をリセット"):
+                    reset_keys = [
+                        'amz_date', 'amz_price', 'amz_item',
+                        'card_date', 'card_price', 'card_desc',
+                    ]
+                    for k in reset_keys:
+                        st.session_state.pop(k, None)
+                    # 利用店名の複数選択は列ごとにキーが変わるため、まとめて削除
+                    for k in list(st.session_state.keys()):
+                        if k.startswith("merchants_"):
+                            st.session_state.pop(k, None)
+                    st.rerun()
+
             col1, col2 = st.columns(2)
-            
+
             with col1:
                 st.markdown("### Amazonデータ列指定")
-                col_amz_date = st.selectbox("購入日", df_amazon.columns, index=None, placeholder="列を選択してください")
+                col_amz_date = st.selectbox("購入日", df_amazon.columns, index=None, key='amz_date', placeholder="列を選択してください")
                 col_amz_price = st.selectbox("金額", df_amazon.columns, index=None, key='amz_price', placeholder="列を選択してください")
                 col_amz_item = st.selectbox("商品名 (検索値A)", df_amazon.columns, index=None, key='amz_item', placeholder="列を選択してください")
 
             with col2:
                 st.markdown("### カード明細列指定")
                 col_card_date = st.selectbox(
-                    "利用日", 
-                    df_card.columns, 
+                    "利用日",
+                    df_card.columns,
                     index=None,
                     key='card_date',
                     placeholder="列を選択してください"
                 )
-                
+
                 col_card_price = st.selectbox(
-                    "金額", 
-                    df_card.columns, 
+                    "金額",
+                    df_card.columns,
                     index=None,
                     key='card_price',
                     placeholder="列を選択してください"
                 )
-                
+
                 col_card_desc = st.selectbox(
-                    "利用店名・商品名 (既存)", 
-                    df_card.columns, 
+                    "利用店名・商品名 (既存)",
+                    df_card.columns,
                     index=None,
                     key='card_desc',
                     placeholder="列を選択してください"
                 )
-                
+
                 # 選択された列のサンプルデータを表示
                 if col_card_desc:
                     sample_values = df_card[col_card_desc].dropna().unique()[:5]
                     st.caption(f"💡 選択中の列「{col_card_desc}」のサンプル: {', '.join([str(x) for x in sample_values])}")
-                    
+
                     # 利用店名フィルタリング UI
-                    unique_merchants = sorted([str(x) for x in df_card[col_card_desc].unique() if x])
-                    
-                    
+                    unique_merchants = sorted([str(x) for x in df_card[col_card_desc].unique() if pd.notna(x) and str(x).strip() != ""])
+
+
                     selected_merchants = st.multiselect(
-                        "照合対象とする店名を選択", 
+                        "照合対象とする店名を選択",
                         options=unique_merchants,
                         default=[],
                         key=f"merchants_{col_card_desc}"
@@ -390,7 +407,10 @@ if amazon_file and card_file:
                 )
 
         else:
-            st.error("PDFから表データを抽出できませんでした。フォーマットを確認してください。")
+            if card_file_type == "PDF":
+                st.error("PDFから表データを抽出できませんでした。フォーマットを確認してください。")
+            else:
+                st.error("CSVから表データを抽出できませんでした。フォーマットを確認してください。")
 
     except Exception as e:
         import traceback

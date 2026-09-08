@@ -316,9 +316,8 @@ def get_default_index(columns, candidates, check_numeric=False, df=None):
         for i, col in enumerate(columns):
             if candidate in str(col):
                 return i
-    return 0
-    
-    # 数値列かどうかで判定 (金額カラムの推定)
+
+    # 3. 数値列かどうかで判定 (金額カラムの推定)
     if check_numeric and df is not None:
             for i, col in enumerate(columns):
                 # 列名が "Col_" で始まる場合、中身が数値っぽいか確認
