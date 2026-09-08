@@ -3,8 +3,35 @@ import pandas as pd
 from utils import extract_table_from_pdf, process_matching
 import utils
 import io
+import json
+from pathlib import Path
 
 st.set_page_config(page_title="Amazon履歴 & カード明細照合アプリ", layout="wide")
+
+# 照合設定(列指定)をブラウザセッションを超えて保存するための設定ファイル
+# 全利用者共通の設定として保存される点に注意
+SETTINGS_FILE = Path(__file__).resolve().parent / "saved_column_settings.json"
+
+
+def load_saved_settings():
+    try:
+        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_saved_settings(settings):
+    try:
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(settings, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+if "_saved_settings" not in st.session_state:
+    st.session_state["_saved_settings"] = load_saved_settings()
+_saved_settings = st.session_state["_saved_settings"]
 
 st.title("Amazon履歴 & カード明細照合アプリ")
 st.markdown("""
@@ -48,7 +75,16 @@ amazon_file = cached_uploader(
 # クレジットカード明細のファイル形式選択
 st.sidebar.markdown("---")
 st.sidebar.subheader("クレジットカード明細")
-card_file_type = st.sidebar.radio("ファイル形式を選択", ["PDF", "CSV"], horizontal=True, key="card_file_type")
+_file_type_options = ["PDF", "CSV"]
+_prev_file_type = st.session_state.get("card_file_type_val") or _saved_settings.get("card_file_type")
+_file_type_index = _file_type_options.index(_prev_file_type) if _prev_file_type in _file_type_options else 0
+card_file_type = st.sidebar.radio(
+    "ファイル形式を選択", _file_type_options, index=_file_type_index, horizontal=True, key="card_file_type"
+)
+st.session_state["card_file_type_val"] = card_file_type
+if _saved_settings.get("card_file_type") != card_file_type:
+    _saved_settings["card_file_type"] = card_file_type
+    save_saved_settings(_saved_settings)
 
 if card_file_type == "PDF":
     card_file = cached_uploader("クレジットカード明細 (PDF)", ["pdf"], "card_pdf", "card_pdf_cache")
@@ -240,18 +276,25 @@ if amazon_file and card_file:
 
 
             # カラムマッピングの設定
-            def persistent_selectbox(label, options, value_key, widget_key, **kwargs):
+            def persistent_selectbox(label, options, value_key, widget_key, settings_field=None, **kwargs):
                 """
                 Streamlitは別ページに移動して戻ると、その間描画されなかった
                 ウィジェットのsession_state(widget_key)を自動的に消去してしまう。
                 そのため、選択値を非ウィジェットの通常キー(value_key)にも複製して保持し、
                 widget_keyが消えていてもそちらから選択状態を復元する。
+                さらにsettings_fieldを指定すると、ブラウザセッションをまたいでも
+                前回の選択列名をファイルから復元する。
                 """
                 options_list = list(options)
                 prev_val = st.session_state.get(value_key)
+                if prev_val is None and settings_field:
+                    prev_val = _saved_settings.get(settings_field)
                 index = options_list.index(prev_val) if prev_val in options_list else None
                 selected = st.selectbox(label, options_list, index=index, key=widget_key, **kwargs)
                 st.session_state[value_key] = selected
+                if settings_field and selected and _saved_settings.get(settings_field) != selected:
+                    _saved_settings[settings_field] = selected
+                    save_saved_settings(_saved_settings)
                 return selected
 
             settings_header_col, settings_reset_col = st.columns([4, 1])
@@ -271,15 +314,19 @@ if amazon_file and card_file:
                     for k in list(st.session_state.keys()):
                         if k.startswith("merchants_"):
                             st.session_state.pop(k, None)
+                    # ファイルに保存した列名の記憶もクリア
+                    for field in ['amz_date', 'amz_price', 'amz_item', 'card_date', 'card_price', 'card_desc']:
+                        _saved_settings.pop(field, None)
+                    save_saved_settings(_saved_settings)
                     st.rerun()
 
             col1, col2 = st.columns(2)
 
             with col1:
                 st.markdown("### Amazonデータ列指定")
-                col_amz_date = persistent_selectbox("購入日", df_amazon.columns, 'amz_date_val', 'amz_date', placeholder="列を選択してください")
-                col_amz_price = persistent_selectbox("金額", df_amazon.columns, 'amz_price_val', 'amz_price', placeholder="列を選択してください")
-                col_amz_item = persistent_selectbox("商品名 (検索値A)", df_amazon.columns, 'amz_item_val', 'amz_item', placeholder="列を選択してください")
+                col_amz_date = persistent_selectbox("購入日", df_amazon.columns, 'amz_date_val', 'amz_date', settings_field='amz_date', placeholder="列を選択してください")
+                col_amz_price = persistent_selectbox("金額", df_amazon.columns, 'amz_price_val', 'amz_price', settings_field='amz_price', placeholder="列を選択してください")
+                col_amz_item = persistent_selectbox("商品名 (検索値A)", df_amazon.columns, 'amz_item_val', 'amz_item', settings_field='amz_item', placeholder="列を選択してください")
 
             with col2:
                 st.markdown("### カード明細列指定")
@@ -287,6 +334,7 @@ if amazon_file and card_file:
                     "利用日",
                     df_card.columns,
                     'card_date_val', 'card_date',
+                    settings_field='card_date',
                     placeholder="列を選択してください"
                 )
 
@@ -294,6 +342,7 @@ if amazon_file and card_file:
                     "金額",
                     df_card.columns,
                     'card_price_val', 'card_price',
+                    settings_field='card_price',
                     placeholder="列を選択してください"
                 )
 
@@ -301,6 +350,7 @@ if amazon_file and card_file:
                     "利用店名・商品名 (既存)",
                     df_card.columns,
                     'card_desc_val', 'card_desc',
+                    settings_field='card_desc',
                     placeholder="列を選択してください"
                 )
 
